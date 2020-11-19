@@ -1,0 +1,163 @@
+---
+title: "20201119-p8133_computingassignment3_jsg2145"
+author: "Jared Garfinkel"
+date: "11/19/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(viridis)
+library(dfcrm)
+knitr::opts_chunk$set(
+	echo = TRUE,
+	warning = FALSE,
+	message = FALSE,
+	fig.width = 8, 
+  fig.height = 6,
+  out.width = "90%"
+)
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+```
+
+```{r}
+two_arm_thompson = function(N = 120, block_size = 30, p_A = 0.5, p_B = 0.5, a = 1){
+  
+  no_blocks = N/block_size
+  
+  Y = list(arm = c(),
+           response = c())
+  pr = 0.5
+  
+  for (i in 1:no_blocks) {
+    r_asst = rbinom(block_size, 1, p = pr)
+    n_A = sum(r_asst)
+    n_B = block_size - sum(r_asst)
+    
+    A_response = rbinom(n_A, 1, p_A)
+    B_response = rbinom(n_B, 1, p_B)
+    
+    Y$arm = append(Y$arm, values = c(rep("A", n_A),
+                                     rep("B", n_B)))
+    Y$response = append(Y$response, values = c(A_response, B_response))
+    
+    # Thompson's rule; update randomization probabilities based on observed outcomes
+    a_A = 1 + sum(A_response)
+    b_A = 1 + n_A - sum(A_response)
+    A_th = rbeta(1e4, a_A, b_A)
+    
+    a_B = 1 + sum(B_response)
+    b_B = 1 + n_B - sum(B_response)
+    B_th = rbeta(1e4, a_B, b_B)
+    
+    r = mean(A_th > B_th)
+    r_asst = r^a / ((r^a) + ((1 - r)^a))
+  }
+  
+  tbl = table(Y$response, Y$arm)
+  
+  test = chisq.test(tbl)
+  return(test$p.value)
+}
+```
+
+```{r}
+two_arm_thompson()
+```
+
+# Problem 1
+
+```{r, cache = TRUE}
+sims = 1e3
+set.seed(719)
+results = map(1:sims, two_arm_thompson)
+p_rej = mean(results < 0.05)
+```
+
+The proportion of trials with p-value less than 0.05 in Scenario A is `r round(p_rej, 3)`.
+
+# Problem 2
+
+```{r}
+two_arm_thompson2 = function(N = 120, block_size = 30, a = 1, test){
+  
+  no_blocks = N/block_size
+  
+  Y = list(block = c(),
+           arm = c(),
+           response = c())
+  # randomization probability for block 1
+  pr = 0.5
+  
+  for (i in 1:no_blocks) {
+    if (i %in% c(1, 2)) {
+      p_A = p_B = 0.3
+    } else {
+      p_A = p_B = 0.6
+    }
+    # randomize subjs based on current randomization probability
+    r_asst = rbinom(block_size, 1, p = pr) # 1 = A, 0 = B
+    n_A = sum(r_asst)
+    n_B = block_size - sum(r_asst)
+    
+    # generate responses on each arm based on true reponse probabilities
+    A_response = rbinom(n_A, 1, p_A)
+    B_response = rbinom(n_B, 1, p_B)
+    
+    # record observed data
+    Y$block = append(Y$block, values = c(rep(i, block_size)))
+    Y$arm = append(Y$arm, values = c(rep("A", n_A),
+                                     rep("B", n_B)))
+    Y$response = append(Y$response, values = c(A_response, B_response))
+    
+    # Thompson's rule; update randomization probabilities based on observed outcomes
+    a_A = 1 + sum(A_response)
+    b_A = 1 + n_A - sum(A_response)
+    A_th = rbeta(1e4, a_A, b_A)
+    
+    a_B = 1 + sum(B_response)
+    b_B = 1 + n_B - sum(B_response)
+    B_th = rbeta(1e4, a_B, b_B)
+    
+    r = mean(A_th > B_th)
+    pr = r^a / ((r^a) + ((1 - r)^a))
+  }
+  
+  return(Y)
+  
+}
+```
+
+## Part a
+
+```{r, cache = TRUE}
+set.seed(719)
+results2 = map(1:sims, ~two_arm_thompson2(test = "Chi"))
+Chi = sapply(results2, function(i){
+  tbl = table(i$response, i$arm)
+  test = chisq.test(tbl)
+  return(test$p.value)
+})
+p_rej2 = mean(Chi < 0.05)
+```
+
+In Scenario B the proportion of p-values less than 0.05 is `r round(p_rej2, 3)`
+
+## Part b
+
+```{r, cache = TRUE}
+MH = sapply(results2, function(i){
+  data <- table(i$arm, i$response, i$block)
+  test = mantelhaen.test(data)
+  return (test$p.value)
+})
+p_rej3 = mean(MH < 0.05)
+```
+
+The proportion of p-values less than 0.05 in Scenario B using the Mantel-Haenzel test is `r round(p_rej3, 3)`.
